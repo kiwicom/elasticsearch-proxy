@@ -123,6 +123,12 @@ ___  ____ ____ _  _ _   _
 
 Have fun!
 
+## Docker
+
+```bash
+docker build -t elasticsearch-proxy . -f Dockerfile
+```
+
 # Options
 
 - Additional request headers
