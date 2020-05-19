@@ -1,4 +1,4 @@
-FROM golang:1.9-alpine
+FROM golang:alpine
 
 RUN apk update && apk add curl \
                           git \
@@ -6,11 +6,9 @@ RUN apk update && apk add curl \
                           make && \
      rm -rf /var/cache/apk/*
 
-RUN mkdir /app
+WORKDIR $GOPATH/src/github.com/medcl/elasticsearch-proxy/
 
-ADD . /app/
-
-WORKDIR /app
+ADD . .
 
 RUN make
 
