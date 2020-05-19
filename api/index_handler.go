@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	log "github.com/cihub/seelog"
 	"github.com/infinitbyte/framework/core/api/router"
@@ -17,6 +18,44 @@ import (
 	"strings"
 	"time"
 )
+
+// Document represents a document
+type Document struct {
+	Index   string          `json:"_index"`
+	Type    string          `json:"_type"`
+	ID      string          `json:"_id"`
+	Version int             `json:"_version"`
+	Found   bool            `json:"found"`
+	Source  json.RawMessage `json:"_source"`
+}
+
+// SearchResult represents the result of the search operation
+type SearchResult struct {
+	Took     uint64 `json:"took"`
+	TimedOut bool   `json:"timed_out"`
+	Shards   struct {
+		Total      int `json:"total"`
+		Successful int `json:"successful"`
+		Skipped    int `json:"skipped"`
+		Failed     int `json:"failed"`
+	} `json:"_shards"`
+	Hits         ResultHits      `json:"hits"`
+	Aggregations json.RawMessage `json:"aggregations"`
+}
+
+// ResultHits represents the result of the search hits
+type ResultHits struct {
+	Total    int     `json:"total"`
+	MaxScore float32 `json:"max_score"`
+	Hits     []struct {
+		Index     string              `json:"_index"`
+		Type      string              `json:"_type"`
+		ID        string              `json:"_id"`
+		Score     float32             `json:"_score"`
+		Source    json.RawMessage     `json:"_source"`
+		Highlight map[string][]string `json:"highlight,omitempty"`
+	} `json:"hits"`
+}
 
 // IndexAction returns cluster health information
 func (handler *API) IndexAction(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
@@ -154,16 +193,17 @@ func (handler *API) handleRead(w http.ResponseWriter, req *http.Request, body []
 			return
 		} else {
 			handler.WriteJSON(w, util.MapStr{
-				"error": "upstram is not exist nor readable",
+				"error": "upstream does not exist or is not readable",
 			}, 500)
 			return
 		}
 	}
 
 	ups := config.GetUpstreamConfigs()
+	var responseBody []byte
+	var searchResult SearchResult
 	for _, v := range ups {
 		if v.Enabled && v.Readable {
-
 			response, err := handler.executeHttpRequest(elastic.GetConfig(v.Elasticsearch), req.URL.String(), req.Method, body)
 
 			if err != nil {
@@ -190,9 +230,85 @@ func (handler *API) handleRead(w http.ResponseWriter, req *http.Request, body []
 				log.Debug("search response: ", string(body), ",", string(response.Body))
 			}
 
+			// Search
+			if strings.Contains(req.URL.Path, "_search") {
+				sr := &SearchResult{}
+				err = json.Unmarshal(response.Body, sr)
+				if err != nil {
+					log.Error(err)
+
+					request := model.Request{}
+					request.Url = req.URL.String()
+					request.Upstream = v.Name
+					request.Method = req.Method
+					request.Body = string(body)
+					model.CreateRequest(&request)
+
+					continue
+				}
+
+				fmt.Println(string(response.Body))
+
+				searchResult.Took = searchResult.Took + sr.Took
+				searchResult.TimedOut = searchResult.TimedOut && sr.TimedOut
+
+				searchResult.Shards.Total = searchResult.Shards.Total + sr.Shards.Total
+				searchResult.Shards.Successful = searchResult.Shards.Successful + sr.Shards.Successful
+				searchResult.Shards.Skipped = searchResult.Shards.Skipped + sr.Shards.Skipped
+				searchResult.Shards.Failed = searchResult.Shards.Failed + sr.Shards.Failed
+
+				searchResult.Hits.Total = searchResult.Hits.Total + sr.Hits.Total
+				searchResult.Hits.Hits = append(searchResult.Hits.Hits, sr.Hits.Hits...)
+
+				if v.Name == "secondary" {
+					res, err := json.MarshalIndent(&searchResult, "", "  ")
+					if err != nil {
+						log.Error(err)
+
+						handler.WriteJSON(w, util.MapStr{
+							"error": err.Error(),
+						}, 500)
+
+						return
+					}
+					responseBody = res
+				} else {
+					request := model.Request{}
+					request.Url = req.URL.String()
+					request.Upstream = v.Name
+					request.Method = req.Method
+					request.Body = string(body)
+					model.CreateRequest(&request)
+
+					continue
+				}
+			} else { // Documents
+				document := &Document{}
+				err = json.Unmarshal(response.Body, document)
+				if err != nil {
+					log.Error(err)
+
+					continue
+				}
+
+				// fetch it from the next upstream
+				if !document.Found {
+					request := model.Request{}
+					request.Url = req.URL.String()
+					request.Upstream = v.Name
+					request.Method = req.Method
+					request.Body = string(body)
+					model.CreateRequest(&request)
+
+					continue
+				}
+
+				responseBody = response.Body
+			}
+
 			w.Header().Add("upstream", v.Name)
 			w.WriteHeader(response.StatusCode)
-			w.Write(response.Body)
+			w.Write(responseBody)
 
 			if handler.cacheConfig.CacheEnabled {
 				handler.redis.Set(hash, string(response.Body), *handler.cacheConfig.GetTTLDuration()).Err()
@@ -208,7 +324,6 @@ func (handler *API) handleRead(w http.ResponseWriter, req *http.Request, body []
 	handler.WriteJSON(w, util.MapStr{
 		"error": noUpstreamMsg,
 	}, 500)
-
 }
 
 // POST should not used to serve as search/read/ requests

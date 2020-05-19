@@ -1,8 +1,8 @@
 package api
 
 import (
-	log "github.com/cihub/seelog"
 	"fmt"
+	log "github.com/cihub/seelog"
 	"github.com/infinitbyte/framework/core/api"
 	"github.com/infinitbyte/framework/core/env"
 	"src/github.com/go-redis/redis"
@@ -65,7 +65,7 @@ func InitAPI() {
 	_, err := client.Ping().Result()
 	if err != nil {
 		log.Error("cache server is not ready: ", err)
-		panic(err)
+		//panic(err)
 	}
 
 	apis := API{redis: client, cacheConfig: cacheConfig}

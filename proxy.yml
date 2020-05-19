@@ -1,25 +1,29 @@
 path.data: data
 path.logs: log
 
-
 api:
   enabled: true
   network:
     binding: 0.0.0.0:2900
   tls:
-    enabled: true
+    enabled: false
 
 elasticsearch:
 - name: default
   enabled: true
-  endpoint: http://localhost:9200
+  endpoint: http://localhost:9200 # local with make
+#  endpoint: http://host.docker.internal:9200 # docker
+- name: backup
+  enabled: true
+  endpoint: http://localhost:9201 # local with make
+#  endpoint: http://host.docker.internal:9201 # docker
 #  index_prefix: proxy-
 #  basic_auth:
 #    username: elastic
 #    password: changeme
 
 cache:
-  enabled: true
+  enabled: false
   redis:
     host: localhost
     port: 6379
@@ -36,41 +40,37 @@ plugins:
   upstream:
   - name: primary
     enabled: true
-    cache:
-      enabled: true
     rate_limit:
       max_qps: 10000
     queue_name: primary
     max_queue_depth: -1
     timeout: 60s
     elasticsearch: default
-  - name: backup
-    enabled: false
-    cache_enabled: false
-    queue_name: backup
+  - name: secondary
+    enabled: true
+    queue_name: secondary
     max_queue_depth: -1
     timeout: 60s
-    elasticsearch: default
+    elasticsearch: backup
 
 
-pipelines:
-- name: primary
-  start:
-    joint: index
-    enabled: true
-  process: []
-  error:
-    joint: logging
-    enabled: true
-- name: backup
-  start:
-    joint: index
-    enabled: true
-  process: []
-  error:
-    joint: logging
-    enabled: true
-
+#pipelines:
+#- name: primary
+#  start:
+#    joint: index
+#    enabled: true
+#  process: []
+#  error:
+#    joint: logging
+#    enabled: true
+#- name: backup
+#  start:
+#    joint: index
+#    enabled: true
+#  process: []
+#  error:
+#    joint: logging
+#    enabled: true
 
 modules:
 - name: elastic
@@ -79,7 +79,6 @@ modules:
   indexer_enabled: true
   store_enabled: true
   orm_enabled: true
-
 - name: web
   enabled: false
   tls:
@@ -87,21 +86,21 @@ modules:
   network:
      binding: 127.0.0.1:9000
 
-- name: pipeline
-  enabled: true
-  runners:
-    - name: primary
-      enabled: true
-      input_queue: primary
-      max_go_routine: 3
-      threshold_in_ms: 0
-      timeout_in_ms: 5000
-      pipeline_id: primary
-
-    - name: backup
-      enabled: true
-      input_queue: backup
-      max_go_routine: 1
-      threshold_in_ms: 0
-      timeout_in_ms: 5000
-      pipeline_id: backup
+#- name: pipeline
+#  enabled: true
+#  runners:
+#    - name: primary
+#      enabled: true
+#      input_queue: primary
+#      max_go_routine: 3
+#      threshold_in_ms: 0
+#      timeout_in_ms: 5000
+#      pipeline_id: primary
+#
+#    - name: backup
+#      enabled: true
+#      input_queue: backup
+#      max_go_routine: 1
+#      threshold_in_ms: 0
+#      timeout_in_ms: 5000
+#      pipeline_id: backup
